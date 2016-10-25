@@ -1,0 +1,199 @@
+group 'gaobs'
+version '1.0-SNAPSHOT'
+
+apply plugin: 'eclipse'
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'maven'
+apply plugin: 'watch'
+apply from: 'dependencyDefinitions.gradle'
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+ext {
+    buildDir "/out/build/${project.name}"
+}
+configurations {
+    deployerJars
+}
+
+repositories {
+    mavenLocal()
+
+    maven {
+        name 'open'
+        url "http://maven.open.com.cn/repository/maven-public/"
+    }
+}
+compileJava {
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
+dependencies {
+    compile(
+            lib.'slf4j-api',
+            lib.'slf4j-log4j12',
+            lib.'log4j',
+            //lib.'mavenAntTasks'
+
+            lib.'spring-web',
+            lib.'spring-webmvc',
+            lib.'servlet-api',
+
+            lib.'jsmth-web',
+            lib.'jsmth-common',
+            lib.'jsmth-data',
+            lib.'jsmth-net',
+            'org.hibernate:hibernate-validator:5.0.3.Final',
+
+            lib."commons-fileupload",
+            lib.'commons-lang',
+
+            lib.'standard',
+            lib.'jstl',
+            lib.'xml-apis',
+            'org.springframework.security:spring-security-taglibs:4.0.4.RELEASE',
+
+            'org.apache.poi:poi:3.9',
+
+            lib.'dom4j',
+            'jaxen:jaxen:1.1.6',
+            lib."disconf-client"
+    )
+
+    testCompile (
+            lib.'junit',
+            lib.'spring-test'
+    )
+
+    deployerJars "org.apache.maven.wagon:wagon-ssh:2.2"
+}
+
+version = '1.0'
+jar {
+    manifest.attributes provider: 'gradle'
+    manifest.attributes["Created-By"] =
+            "${System.getProperty("java.version")} (${System.getProperty("java.specification.vendor")})"
+    manifest.attributes["Implementation-Title"] = project.name
+    manifest.attributes["Implementation-Version"] = project.version
+
+    from("${rootProject.projectDir}/src/dist") {
+        include "license.txt"
+        include "notice.txt"
+        into "META-INF"
+        expand(copyright: new Date().format("yyyy"), version: project.version)
+    }
+}
+//create a single Jar with all dependencies
+task createSingleJarWithDependencies(type: Jar) {
+    manifest {
+        attributes 'Implementation-Title': 'Gradle Jar File Example',
+                'Implementation-Version': version,
+                'Main-Class': 'com.mkyong.DateUtils'
+    }
+    baseName = project.name + '-dependicies'
+    from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
+    with jar
+    destinationDir = file("${buildDir}/jar/")
+    rename('classes.jar', "${project.name}-${version}-dependicies.jar")
+}
+task doCopyClassResourceFiles(type: Copy, dependsOn: compileJava){
+    from 'src/main/java/'
+    into "${buildDir}/classes/main/"
+    exclude '**/*.java'
+}
+task doBuildProjectPom << {
+    pom {
+        project {
+            inceptionYear '2016'
+            licenses {
+                license {
+                    name 'The Apache Software License, Version 2.0'
+                    url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    distribution 'repo'
+                }
+            }
+        }
+    }.writeTo("$buildDir/pom/pom.xml")
+}
+task doCopyProjectPomToJar(type: Copy,dependsOn: doBuildProjectPom) {
+    from "$buildDir/pom/pom.xml"
+    into "${buildDir}/../jar"
+    rename { String fileName ->
+        fileName.replace('pom.xml', "${project.name}-${version}.pom")
+    }
+}
+//依赖编译，然后打包JAR
+task buildProjectToJar(type:Jar, dependsOn: [compileJava,doCopyClassResourceFiles,doBuildProjectPom,doCopyProjectPomToJar]) {
+    from "${buildDir}/classes/main"
+    destinationDir = file("${buildDir}/../jar/")
+    rename('classes.jar',"${project.name}-${version}.jar")
+}
+task autobuild(type: Copy, dependsOn: build) {
+    from configurations.runtime
+    into "${buildDir}/dependicies" // 目标位置
+}
+//清除上次的编译过的文件
+task clearProject(type:Delete){
+//        delete 'build','target'
+    println( "${buildDir}")
+    delete "${buildDir}"
+    println("delete done.")
+}
+task sourceSetProperties << {
+    sourceSets {
+        main {
+            println "java.srcDirs = ${java.srcDirs}"
+            println "resources.srcDirs = ${resources.srcDirs}"
+            println "java.files = ${java.files.name}"
+            println "allJava.files = ${allJava.files.name}"
+            println "resources.files = ${resources.files.name}"
+            println "allSource.files = ${allSource.files.name}"
+            println "output.classesDir = ${output.classesDir}"
+            println "output.resourcesDir = ${output.resourcesDir}"
+            println "output.files = ${output.files}"
+        }
+    }
+}
+
+uploadArchives {
+    repositories.mavenDeployer {
+        configuration = configurations.deployerJars
+//            repository(url: "scp://repos.mycompany.com/releases") {
+//                authentication(userName: "me", password: "myPassword")
+//            }
+        repository(url: "scp://repos.mycompany.com/releases") {
+            authentication(userName: "me", password: "myPassword")
+        }
+    }
+}
+uploadArchives {
+    repositories {
+//            flatDir {
+//                dirs 'repos'
+//            }
+        mavenDeployer {
+            repository(url: "${buildDir}/myRepo/")
+        }
+    }
+}
+
+
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.bluepapa32:gradle-watch-plugin:0.1.3'
+    }
+}
+
+watch {
+    java {
+        files files('src/main/java')
+        tasks 'compileJava'
+    }
+    resources {
+        files fileTree(dir: 'src/main/resources', include: '**/*.xml')
+        tasks 'processResources'
+    }
+}
